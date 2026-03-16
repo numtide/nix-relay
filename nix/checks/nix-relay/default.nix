@@ -101,11 +101,11 @@ pkgs.testers.nixosTest {
     server.wait_for_unit("nix-relay")
     server.wait_for_open_port(8080)
 
+    # --- OIDC auth test ---
     # Read the pre-generated JWT token
     token = server.succeed("cat ${tokenFile}").strip()
 
     # Test: client connects with valid JWT, sends data, gets echo back
-    # Note: websocat requires -H at the end or with = to avoid argument confusion
     result = client.succeed(
         f"printf 'hello nix-relay' | timeout 5 websocat --binary ws://server:8080/relay -H='Authorization: Bearer {token}'"
     ).strip()
@@ -115,5 +115,21 @@ pkgs.testers.nixosTest {
     client.fail(
         "echo test | timeout 5 websocat --binary ws://server:8080/relay"
     )
+
+    # --- Local JWT auth test ---
+    # The NixOS module auto-generates keys in /var/lib/nix-relay/
+    server.succeed("test -f /var/lib/nix-relay/private.pem")
+    server.succeed("test -f /var/lib/nix-relay/public.pem")
+
+    # Generate a local token
+    local_token = server.succeed(
+        "${nix-relay}/bin/nix-relay token generate --key-file /var/lib/nix-relay/private.pem --label test-local --exp 1h"
+    ).strip()
+
+    # Test: client connects with local JWT, sends data, gets echo back
+    result = client.succeed(
+        f"printf 'hello local jwt' | timeout 5 websocat --binary ws://server:8080/relay -H='Authorization: Bearer {local_token}'"
+    ).strip()
+    assert result == "hello local jwt", f"expected echo, got: {result!r}"
   '';
 }

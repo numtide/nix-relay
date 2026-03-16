@@ -31,6 +31,23 @@ pub struct AuthConfig {
     pub allowed_org: String,
     #[serde(default = "default_jwks_cache_ttl_secs")]
     pub jwks_cache_ttl_secs: u64,
+    /// Path to Ed25519 public key PEM for local JWT auth
+    #[serde(default)]
+    pub local_key_file: Option<String>,
+}
+
+impl AuthConfig {
+    pub fn has_oidc(&self) -> bool {
+        !self.allowed_org.is_empty()
+    }
+
+    pub fn has_local_key(&self) -> bool {
+        self.local_key_file.is_some()
+    }
+
+    pub fn has_any_backend(&self) -> bool {
+        self.has_oidc() || self.has_local_key()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,6 +106,7 @@ impl Default for AuthConfig {
             audience: default_audience(),
             allowed_org: String::new(),
             jwks_cache_ttl_secs: default_jwks_cache_ttl_secs(),
+            local_key_file: None,
         }
     }
 }
@@ -141,6 +159,9 @@ impl Config {
             config.auth.jwks_cache_ttl_secs = v
                 .parse()
                 .map_err(|e| Error::Config(format!("NIX_RELAY_JWKS_CACHE_TTL_SECS: {e}")))?;
+        }
+        if let Ok(v) = std::env::var("NIX_RELAY_LOCAL_KEY_FILE") {
+            config.auth.local_key_file = Some(v);
         }
         if let Ok(v) = std::env::var("NIX_RELAY_DAEMON_PATH") {
             config.daemon.nix_daemon_path = v;
@@ -201,5 +222,30 @@ max_connections = 8
         assert_eq!(config.daemon.max_connections, 8);
         // Defaults still apply for unset values
         assert_eq!(config.daemon.timeout_secs, 3600);
+        assert!(config.auth.local_key_file.is_none());
+    }
+
+    #[test]
+    fn test_parse_toml_with_local_key() {
+        let dir = std::env::temp_dir().join("nix-relay-test-config-local");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.toml");
+        std::fs::write(
+            &path,
+            r#"
+[auth]
+local_key_file = "/var/lib/nix-relay/public.pem"
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(path)).unwrap();
+        assert_eq!(
+            config.auth.local_key_file.as_deref(),
+            Some("/var/lib/nix-relay/public.pem")
+        );
+        assert!(config.auth.has_local_key());
+        assert!(!config.auth.has_oidc());
+        assert!(config.auth.has_any_backend());
     }
 }

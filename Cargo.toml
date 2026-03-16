@@ -5,8 +5,11 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4", features = ["derive"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
 futures-util = "0.3"
 jsonwebtoken = "9"
+rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,5 +20,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
 http = "1"
+rand = "0.8"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

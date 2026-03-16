@@ -34,6 +34,20 @@ in
       default = false;
       description = "Whether to open the listen port in the firewall.";
     };
+
+    localAuth = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable local JWT authentication with auto-generated Ed25519 keys.";
+      };
+
+      keyDir = lib.mkOption {
+        type = lib.types.path;
+        default = "/var/lib/nix-relay";
+        description = "Directory for the Ed25519 key pair.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -44,6 +58,9 @@ in
       auth.issuer = lib.mkDefault "https://token.actions.githubusercontent.com";
       auth.audience = lib.mkDefault "api://nix-relay";
       auth.jwks_cache_ttl_secs = lib.mkDefault 3600;
+      auth.local_key_file = lib.mkIf cfg.localAuth.enable (
+        lib.mkDefault "${cfg.localAuth.keyDir}/public.pem"
+      );
       daemon.nix_daemon_path = lib.mkDefault "${config.nix.package}/bin/nix-daemon";
       daemon.extra_args = lib.mkDefault [ "--stdio" ];
       daemon.timeout_secs = lib.mkDefault 3600;
@@ -79,7 +96,7 @@ in
       serviceConfig = {
         User = "nix-relay";
         Restart = "always";
-        ExecStart = "${lib.getExe cfg.package} ${configFile}";
+        ExecStart = "${lib.getExe cfg.package} serve ${configFile}";
 
         # Hardening
         ProtectSystem = "strict";
@@ -87,6 +104,15 @@ in
         PrivateDevices = true;
         NoNewPrivileges = true;
         RestrictNamespaces = true;
+      }
+      // lib.optionalAttrs cfg.localAuth.enable {
+        StateDirectory = "nix-relay";
+        ExecStartPre = pkgs.writeShellScript "nix-relay-keygen" ''
+          key_dir="${cfg.localAuth.keyDir}"
+          if [ ! -f "$key_dir/private.pem" ]; then
+            ${lib.getExe cfg.package} key generate --output "$key_dir"
+          fi
+        '';
       };
     };
   };

@@ -9,12 +9,12 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::auth::AuthValidator;
+use crate::auth::AuthService;
 use crate::config::DaemonConfig;
 use crate::error::Error;
 
 pub struct RelayState {
-    pub auth: AuthValidator,
+    pub auth: AuthService,
     pub daemon_config: DaemonConfig,
     pub connection_semaphore: Arc<Semaphore>,
 }
@@ -35,14 +35,9 @@ pub async fn relay_handler(
         .strip_prefix("Bearer ")
         .ok_or(Error::InvalidAuthFormat)?;
 
-    let claims = state.auth.validate_token(token).await?;
-    let repo = claims
-        .claims
-        .repository
-        .as_deref()
-        .unwrap_or("unknown")
-        .to_string();
-    info!(repository = %repo, "authenticated client");
+    let auth_info = state.auth.validate_token(token).await?;
+    let client = auth_info.client_identity;
+    info!(client = %client, "authenticated client");
 
     // Acquire connection permit
     let permit = state
@@ -58,8 +53,8 @@ pub async fn relay_handler(
         .protocols(["binary"])
         .on_upgrade(move |socket| async move {
             let _permit = permit; // Hold permit for duration
-            if let Err(e) = handle_connection(socket, daemon_config, timeout_secs, &repo).await {
-                error!(repository = %repo, error = %e, "relay session ended with error");
+            if let Err(e) = handle_connection(socket, daemon_config, timeout_secs, &client).await {
+                error!(client = %client, error = %e, "relay session ended with error");
             }
         }))
 }
@@ -68,7 +63,7 @@ async fn handle_connection(
     socket: WebSocket,
     daemon_config: DaemonConfig,
     timeout_secs: u64,
-    repo: &str,
+    client: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut cmd = Command::new(&daemon_config.nix_daemon_path);
     for arg in &daemon_config.extra_args {
@@ -83,14 +78,14 @@ async fn handle_connection(
     let mut daemon_stdout = child.stdout.take().expect("stdout piped");
     let mut daemon_stderr = child.stderr.take().expect("stderr piped");
 
-    info!(repository = %repo, pid = child.id().unwrap_or(0), "spawned daemon");
+    info!(client = %client, pid = child.id().unwrap_or(0), "spawned daemon");
 
     let (mut ws_sink, mut ws_stream) = socket.split();
 
     let timeout = tokio::time::Duration::from_secs(timeout_secs);
 
     // Spawn stderr logger
-    let repo_clone = repo.to_string();
+    let client_clone = client.to_string();
     let stderr_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 4096];
         loop {
@@ -98,7 +93,7 @@ async fn handle_connection(
                 Ok(0) => break,
                 Ok(n) => {
                     let text = String::from_utf8_lossy(&buf[..n]);
-                    debug!(repository = %repo_clone, stderr = %text, "daemon stderr");
+                    debug!(client = %client_clone, stderr = %text, "daemon stderr");
                 }
                 Err(e) => {
                     warn!(error = %e, "daemon stderr read error");
@@ -160,7 +155,7 @@ async fn handle_connection(
     .await;
 
     if result.is_err() {
-        warn!(repository = %repo, "session timed out");
+        warn!(client = %client, "session timed out");
     }
 
     // Clean up
@@ -169,6 +164,6 @@ async fn handle_connection(
     let _ = child.wait().await;
     stderr_task.abort();
 
-    info!(repository = %repo, "relay session ended");
+    info!(client = %client, "relay session ended");
     Ok(())
 }

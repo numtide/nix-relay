@@ -9,6 +9,12 @@ audience = "api://nix-relay"
 allowed_org = "myorg"
 jwks_cache_ttl_secs = 3600
 
+# Local JWT auth (optional)
+# Point to an Ed25519 public key to accept locally-generated tokens.
+# Generate a key pair: nix-relay key generate --output /var/lib/nix-relay
+# Generate a token:   nix-relay token generate --key-file /var/lib/nix-relay/private.pem
+# local_key_file = "/var/lib/nix-relay/public.pem"
+
 [daemon]
 nix_daemon_path = "nix-daemon"
 extra_args = ["--stdio"]
