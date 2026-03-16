@@ -1,0 +1,16 @@
+[server]
+listen = "0.0.0.0:8080"
+shutdown_grace_secs = 30
+
+[auth]
+# GitHub OIDC issuer (fixed)
+issuer = "https://token.actions.githubusercontent.com"
+audience = "api://nix-relay"
+allowed_org = "myorg"
+jwks_cache_ttl_secs = 3600
+
+[daemon]
+nix_daemon_path = "nix-daemon"
+extra_args = ["--stdio"]
+timeout_secs = 3600
+max_connections = 32

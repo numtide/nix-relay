@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+
+      # Build the client locally first (can't use remote store to build itself)
+      - name: Configure nix-relay
+        run: |
+          nix_relay_client=$(nix build .#nix-relay-client --print-out-paths --no-link --log-format bar-with-logs)
+
+          # Write a wrapper that injects env vars the daemon can't see.
+          # Must NOT be in /tmp since the daemon uses PrivateTmp.
+          wrapper=/usr/local/bin/nix-relay-wrapper
+          printf '#!/bin/bash\nexport NIX_RELAY_URL="wss://nix-relay.numtide.com/relay"\nexport ACTIONS_ID_TOKEN_REQUEST_URL="%s"\nexport ACTIONS_ID_TOKEN_REQUEST_TOKEN="%s"\nexec %s/bin/nix-relay-client "$@"\n' \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" \
+            "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$nix_relay_client" \
+            | sudo tee "$wrapper" > /dev/null
+          sudo chmod +x "$wrapper"
+
+      - run: nix build -L --eval-store auto --store "ssh-ng://localhost?remote-program=/usr/local/bin/nix-relay-wrapper" .#nix-relay .#nix-relay-client
+      - run: nix flake check -L --all-systems --eval-store auto --store "ssh-ng://localhost?remote-program=/usr/local/bin/nix-relay-wrapper"

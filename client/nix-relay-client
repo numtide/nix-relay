@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Bridge script: connects stdin/stdout to nix-relay WebSocket server.
+# Used as remote-program in ssh-ng://localhost?remote-program=nix-relay-client
+#
+# Token resolution order:
+#   1. NIX_RELAY_TOKEN env var (explicit, works with any provider)
+#   2. GitHub Actions OIDC (detected via ACTIONS_ID_TOKEN_REQUEST_URL)
+#   3. GitLab CI OIDC (detected via GITLAB_OIDC_TOKEN or CI_JOB_JWT_V2)
+#   4. CircleCI OIDC (detected via CIRCLE_OIDC_TOKEN_V2)
+set -euo pipefail
+
+relay_url="${NIX_RELAY_URL:?NIX_RELAY_URL must be set}"
+audience="${NIX_RELAY_AUDIENCE:-api://nix-relay}"
+
+log() { echo "nix-relay-client: $*" >&2; }
+
+log "connecting to $relay_url"
+
+acquire_token() {
+    # 1. Explicit token
+    if [[ -n "${NIX_RELAY_TOKEN:-}" ]]; then
+        log "using explicit NIX_RELAY_TOKEN"
+        printf '%s' "$NIX_RELAY_TOKEN"
+        return
+    fi
+
+    # 2. GitHub Actions
+    if [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] &&
+        [[ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
+        log "acquiring GitHub Actions OIDC token"
+        local response
+        response=$(curl -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${audience}")
+        local token
+        token=$(printf '%s' "$response" | jq -r '.value')
+        if [[ -n "$token" ]] && [[ "$token" != "null" ]]; then
+            log "OIDC token acquired (${#token} chars)"
+            printf '%s' "$token"
+            return
+        fi
+        log "error: GitHub Actions OIDC token request failed"
+        log "response: $response"
+        exit 1
+    fi
+
+    # 3. GitLab CI
+    if [[ -n "${GITLAB_OIDC_TOKEN:-}" ]]; then
+        log "using GitLab OIDC token"
+        printf '%s' "$GITLAB_OIDC_TOKEN"
+        return
+    fi
+    if [[ -n "${CI_JOB_JWT_V2:-}" ]]; then
+        log "using GitLab CI_JOB_JWT_V2 token"
+        printf '%s' "$CI_JOB_JWT_V2"
+        return
+    fi
+
+    # 4. CircleCI
+    if [[ -n "${CIRCLE_OIDC_TOKEN_V2:-}" ]]; then
+        log "using CircleCI OIDC token"
+        printf '%s' "$CIRCLE_OIDC_TOKEN_V2"
+        return
+    fi
+
+    echo "Error: no OIDC token found." >&2
+    echo "Set NIX_RELAY_TOKEN or run in a supported CI environment" >&2
+    echo "(GitHub Actions, GitLab CI, CircleCI)." >&2
+    exit 1
+}
+
+token=$(acquire_token)
+
+log "launching websocat"
+exec websocat --binary \
+    -H="Authorization: Bearer ${token}" \
+    "$relay_url"
