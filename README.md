@@ -115,6 +115,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
+      - name: Install nix-relay-client
+        run: nix profile install git+https://git.ntd.one/anthropic/nix-relay#nix-relay-client
       - run: |
           nix build --eval-store auto \
             --store 'ssh-ng://localhost?remote-program=nix-relay-client' \
