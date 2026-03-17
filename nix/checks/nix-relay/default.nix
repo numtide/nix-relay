@@ -5,7 +5,7 @@
 }:
 
 let
-  nix-relay = perSystem.self.nix-relay;
+  inherit (perSystem.self) nix-relay;
 
   # Generate JWKS and JWT token from the test RSA keys
   testCredentials =

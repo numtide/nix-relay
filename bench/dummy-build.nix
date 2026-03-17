@@ -1,4 +1,6 @@
-{ nonce ? "default" }:
+{
+  nonce ? "default",
+}:
 derivation {
   name = "bench-dummy-${nonce}";
   system = builtins.currentSystem;

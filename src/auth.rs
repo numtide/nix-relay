@@ -223,7 +223,7 @@ impl LocalValidator {
     pub fn validate_token(&self, token: &str) -> Result<AuthInfo, Error> {
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.set_issuer(&["nix-relay"]);
-        validation.validate_aud = false;
+        // validation.validate_aud = false;
         decode::<LocalClaims>(token, &self.decoding_key, &validation)
             .map(|data| AuthInfo {
                 client_identity: data.claims.sub.unwrap_or_else(|| "local".to_string()),

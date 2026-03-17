@@ -178,8 +178,8 @@ async fn test_relay_rejects_no_auth() {
 /// Integration test: relay with local Ed25519 JWT auth.
 #[tokio::test]
 async fn test_relay_echo_with_local_token() {
-    use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     use ed25519_dalek::SigningKey;
+    use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     use rand::rngs::OsRng;
 
     // Generate Ed25519 key pair
