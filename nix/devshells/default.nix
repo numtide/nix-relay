@@ -1,6 +1,7 @@
 {
   pkgs,
   inputs,
+  perSystem,
   ...
 }:
 let
@@ -11,5 +12,9 @@ craneLib.devShell {
     pkgs.websocat
     pkgs.jq
     pkgs.shellcheck
+    perSystem.self.formatter
+    pkgs.rust-analyzer
+    pkgs.cargo
+    pkgs.rustc
   ];
 }
