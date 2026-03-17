@@ -1,4 +1,4 @@
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, TokenData, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, TokenData, Validation, decode, decode_header};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -110,25 +110,32 @@ impl AuthValidator {
             .json()
             .await?;
 
-        let mut keys = HashMap::new();
-        for jwk in &jwks.keys {
-            if jwk.kty == "RSA" {
-                match DecodingKey::from_rsa_components(&jwk.n, &jwk.e) {
-                    Ok(key) => {
-                        keys.insert(jwk.kid.clone(), key);
-                    }
-                    Err(e) => {
-                        warn!(kid = %jwk.kid, error = %e, "skipping invalid JWK");
-                    }
-                }
-            }
+        let keys = jwks
+            .keys
+            .into_iter()
+            .filter(|jwk| jwk.kty == "RSA")
+            .map(|jwk| {
+                (
+                    jwk.kid.clone(),
+                    DecodingKey::from_rsa_components(&jwk.n, &jwk.e),
+                )
+            })
+            .collect::<HashMap<String, Result<DecodingKey, _>>>();
+
+        for (kid, err) in keys
+            .iter()
+            .filter_map(|(k, v)| v.clone().err().map(|err| (k, err)))
+        {
+            warn!(kid = %kid, error = %err, "skipping invalid JWK")
         }
 
         info!(count = keys.len(), "cached JWKS keys");
 
-        let mut cache = self.cache.write().await;
-        *cache = Some(JwksCache {
-            keys,
+        *(self.cache.write().await) = Some(JwksCache {
+            keys: keys
+                .into_iter()
+                .filter_map(|(k, v)| v.ok().map(|err| (k, err)))
+                .collect(),
             last_refresh: Instant::now(),
         });
 
@@ -217,10 +224,11 @@ impl LocalValidator {
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.set_issuer(&["nix-relay"]);
         validation.validate_aud = false;
-        let data = decode::<LocalClaims>(token, &self.decoding_key, &validation)?;
-        Ok(AuthInfo {
-            client_identity: data.claims.sub.unwrap_or_else(|| "local".to_string()),
-        })
+        decode::<LocalClaims>(token, &self.decoding_key, &validation)
+            .map(|data| AuthInfo {
+                client_identity: data.claims.sub.unwrap_or_else(|| "local".to_string()),
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -289,7 +297,7 @@ impl AuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
 
     fn generate_rsa_keys() -> (EncodingKey, DecodingKey) {
         // Generate a test RSA key pair using the rsa crate is complex,
