@@ -1,9 +1,13 @@
-use serde::Deserialize;
+use figment2::{
+    providers::{Env, Format, Serialized, Toml},
+    Figment,
+};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
@@ -13,26 +17,19 @@ pub struct Config {
     pub daemon: DaemonConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
-    #[serde(default = "default_listen")]
     pub listen: String,
-    #[serde(default = "default_shutdown_grace_secs")]
     pub shutdown_grace_secs: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthConfig {
-    #[serde(default = "default_issuer")]
     pub issuer: String,
-    #[serde(default = "default_audience")]
     pub audience: String,
-    #[serde(default)]
     pub allowed_org: String,
-    #[serde(default = "default_jwks_cache_ttl_secs")]
     pub jwks_cache_ttl_secs: u64,
     /// Path to Ed25519 public key PEM for local JWT auth
-    #[serde(default)]
     pub local_key_file: Option<String>,
 }
 
@@ -50,51 +47,19 @@ impl AuthConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DaemonConfig {
-    #[serde(default = "default_nix_daemon_path")]
     pub nix_daemon_path: String,
-    #[serde(default = "default_extra_args")]
     pub extra_args: Vec<String>,
-    #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
-    #[serde(default = "default_max_connections")]
     pub max_connections: u32,
-}
-
-fn default_listen() -> String {
-    "0.0.0.0:8080".to_string()
-}
-fn default_shutdown_grace_secs() -> u64 {
-    30
-}
-fn default_issuer() -> String {
-    "https://token.actions.githubusercontent.com".to_string()
-}
-fn default_audience() -> String {
-    "api://nix-relay".to_string()
-}
-fn default_jwks_cache_ttl_secs() -> u64 {
-    3600
-}
-fn default_nix_daemon_path() -> String {
-    "nix-daemon".to_string()
-}
-fn default_extra_args() -> Vec<String> {
-    vec!["--stdio".to_string()]
-}
-fn default_timeout_secs() -> u64 {
-    3600
-}
-fn default_max_connections() -> u32 {
-    32
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            listen: default_listen(),
-            shutdown_grace_secs: default_shutdown_grace_secs(),
+            listen: "0.0.0.0:8080".to_string(),
+            shutdown_grace_secs: 30,
         }
     }
 }
@@ -102,10 +67,10 @@ impl Default for ServerConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            issuer: default_issuer(),
-            audience: default_audience(),
+            issuer: "https://token.actions.githubusercontent.com".to_string(),
+            audience: "api://nix-relay".to_string(),
             allowed_org: String::new(),
-            jwks_cache_ttl_secs: default_jwks_cache_ttl_secs(),
+            jwks_cache_ttl_secs: 3600,
             local_key_file: None,
         }
     }
@@ -114,68 +79,35 @@ impl Default for AuthConfig {
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
-            nix_daemon_path: default_nix_daemon_path(),
-            extra_args: default_extra_args(),
-            timeout_secs: default_timeout_secs(),
-            max_connections: default_max_connections(),
+            nix_daemon_path: "nix-daemon".to_string(),
+            extra_args: vec!["--stdio".to_string()],
+            timeout_secs: 3600,
+            max_connections: 32,
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server: Default::default(),
+            auth: Default::default(),
+            daemon: Default::default(),
         }
     }
 }
 
 impl Config {
     pub fn load(path: Option<PathBuf>) -> Result<Self, Error> {
-        let mut config = if let Some(path) = path {
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| Error::Config(format!("reading {}: {}", path.display(), e)))?;
-            toml::from_str(&content)
-                .map_err(|e| Error::Config(format!("parsing {}: {}", path.display(), e)))?
-        } else {
-            Config {
-                server: ServerConfig::default(),
-                auth: AuthConfig::default(),
-                daemon: DaemonConfig::default(),
-            }
-        };
+        let mut figment = Figment::from(Serialized::from(Config::default(), "default"));
+        if let Some(path) = path {
+            figment = figment.admerge(Toml::file(path));
+        }
+        figment = figment.admerge(Env::prefixed("NIX_RELAY_"));
 
-        // Environment variable overrides
-        if let Ok(v) = std::env::var("NIX_RELAY_LISTEN") {
-            config.server.listen = v;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_SHUTDOWN_GRACE_SECS") {
-            config.server.shutdown_grace_secs = v
-                .parse()
-                .map_err(|e| Error::Config(format!("NIX_RELAY_SHUTDOWN_GRACE_SECS: {e}")))?;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_ISSUER") {
-            config.auth.issuer = v;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_AUDIENCE") {
-            config.auth.audience = v;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_ALLOWED_ORG") {
-            config.auth.allowed_org = v;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_JWKS_CACHE_TTL_SECS") {
-            config.auth.jwks_cache_ttl_secs = v
-                .parse()
-                .map_err(|e| Error::Config(format!("NIX_RELAY_JWKS_CACHE_TTL_SECS: {e}")))?;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_LOCAL_KEY_FILE") {
-            config.auth.local_key_file = Some(v);
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_DAEMON_PATH") {
-            config.daemon.nix_daemon_path = v;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_TIMEOUT_SECS") {
-            config.daemon.timeout_secs = v
-                .parse()
-                .map_err(|e| Error::Config(format!("NIX_RELAY_TIMEOUT_SECS: {e}")))?;
-        }
-        if let Ok(v) = std::env::var("NIX_RELAY_MAX_CONNECTIONS") {
-            config.daemon.max_connections = v
-                .parse()
-                .map_err(|e| Error::Config(format!("NIX_RELAY_MAX_CONNECTIONS: {e}")))?;
-        }
+        let config: Config = figment
+            .extract()
+            .map_err(|e| Error::Config(format!("building config: {}", e)))?;
 
         Ok(config)
     }
