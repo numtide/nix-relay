@@ -22,7 +22,7 @@ in
 
     settings = lib.mkOption {
       default = { };
-      type = configFormat.type;
+      inherit (configFormat) type;
       description = ''
         Configuration for nix-relay, serialized to TOML.
         See config.example.toml for available options.

@@ -1,9 +1,9 @@
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 use clap::Parser;
 use nix_relay::auth::AuthService;
 use nix_relay::config::Config;
-use nix_relay::relay::{relay_handler, RelayState};
+use nix_relay::relay::{RelayState, relay_handler};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -82,14 +82,9 @@ fn parse_duration(s: &str) -> Result<u64, String> {
 }
 
 fn cmd_key_generate(output: PathBuf) {
-    use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     use ed25519_dalek::SigningKey;
+    use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     use rand::rngs::OsRng;
-
-    std::fs::create_dir_all(&output).unwrap_or_else(|e| {
-        eprintln!("error: cannot create directory {}: {e}", output.display());
-        std::process::exit(1);
-    });
 
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
@@ -109,6 +104,11 @@ fn cmd_key_generate(output: PathBuf) {
 
     let private_path = output.join("private.pem");
     let public_path = output.join("public.pem");
+
+    std::fs::create_dir_all(&output).unwrap_or_else(|e| {
+        eprintln!("error: cannot create directory {}: {e}", output.display());
+        std::process::exit(1);
+    });
 
     std::fs::write(&private_path, private_pem.as_bytes()).unwrap_or_else(|e| {
         eprintln!("error: writing {}: {e}", private_path.display());
@@ -234,31 +234,27 @@ async fn cmd_serve(config_path: Option<PathBuf>) {
     };
 
     if !config.auth.has_any_backend() {
-        error!("no auth backend configured: set auth.allowed_org (OIDC) and/or auth.local_key_file (local JWT)");
+        error!(
+            "no auth backend configured: set auth.allowed_org (OIDC) and/or auth.local_key_file (local JWT)"
+        );
         std::process::exit(1);
     }
 
     // Build OIDC config if allowed_org is set
-    let oidc_config = if config.auth.has_oidc() {
-        Some(config.auth.clone())
-    } else {
-        None
-    };
+    let oidc_config = config.auth.has_oidc().then(|| config.auth.clone());
 
     // Read local key PEM if configured
-    let local_key_pem = match &config.auth.local_key_file {
-        Some(path) => {
-            let pem = match std::fs::read_to_string(path) {
-                Ok(p) => p,
-                Err(e) => {
-                    error!(path = %path, error = %e, "failed to read local key file");
-                    std::process::exit(1);
-                }
-            };
-            Some(pem)
-        }
-        None => None,
-    };
+    let local_key_pem = config.auth.local_key_file.clone().map(|path| {
+        let pem = match std::fs::read_to_string(&path) {
+            Ok(p) => p,
+            Err(e) => {
+                error!(path = %path, error = %e, "failed to read local key file");
+                std::process::exit(1);
+            }
+        };
+
+        pem
+    });
 
     info!(
         listen = %config.server.listen,
@@ -285,13 +281,12 @@ async fn cmd_serve(config_path: Option<PathBuf>) {
         .route("/relay", get(relay_handler))
         .with_state(state);
 
-    let listener = match TcpListener::bind(&config.server.listen).await {
-        Ok(l) => l,
-        Err(e) => {
+    let listener = TcpListener::bind(&config.server.listen)
+        .await
+        .unwrap_or_else(|e| {
             error!(addr = %config.server.listen, error = %e, "failed to bind");
             std::process::exit(1);
-        }
-    };
+        });
 
     info!(addr = %config.server.listen, "listening");
 
