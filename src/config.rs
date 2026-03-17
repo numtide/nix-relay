@@ -101,9 +101,9 @@ impl Config {
     pub fn load(path: Option<PathBuf>) -> Result<Self, Error> {
         let mut figment = Figment::from(Serialized::from(Config::default(), "default"));
         if let Some(path) = path {
-            figment = figment.admerge(Toml::file(path));
+            figment = figment.merge(Toml::file(path));
         }
-        figment = figment.admerge(Env::prefixed("NIX_RELAY_"));
+        figment = figment.merge(Env::prefixed("NIX_RELAY_"));
 
         let config: Config = figment
             .extract()
