@@ -23,4 +23,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
 http = "1"
 rand = "0.8"
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
