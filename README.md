@@ -1,5 +1,12 @@
 # nix-relay
 
+> [!WARNING]
+> **Archived.** nix-relay is replaced by
+> [nix-grpc-store](https://github.com/Mic92/nix-grpc-store). Its gRPC store
+> and build-farm client authenticate every call with an OIDC bearer token
+> (`token-file=`) or an mTLS client certificate, so remote builds need no SSH
+> keys and no relay. Use nix-grpc-store instead. This repository is read-only.
+
 OIDC-authenticated Nix remote build relay. Allows GitHub Actions runners to use
 remote Nix builders without SSH keys -- authentication uses GitHub's native OIDC
 tokens instead.
